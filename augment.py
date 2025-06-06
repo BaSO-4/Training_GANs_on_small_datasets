@@ -282,17 +282,19 @@ def image_space_filter_and_corrupt(Y, p):
         filt2d = filt2d / filt2d.sum()
         size2 = (dilate * 2) * (L - 1) + 1
         filt1d2 = torch.zeros((size2,), device=device)
-        filt1d2[::(dilate * 2)] = low1d
+        filt1d2[:: (dilate * 2)] = low1d
         filt2d2 = filt1d2.unsqueeze(1) @ filt1d2.unsqueeze(0)
         filt2d2 = filt2d2 / filt2d2.sum()
         if size1 < size2:
             diff = size2 - size1
-            pad = diff // 2
-            filt2d = F.pad(filt2d, (pad, pad, pad, pad), mode='constant', value=0.0)
+            pad0 = diff // 2
+            pad1 = diff - pad0
+            filt2d = F.pad(filt2d, (pad0, pad1, pad0, pad1), mode='constant', value=0.0)
         elif size2 < size1:
             diff = size1 - size2
-            pad = diff // 2
-            filt2d2 = F.pad(filt2d2, (pad, pad, pad, pad), mode='constant', value=0.0)
+            pad0 = diff // 2
+            pad1 = diff - pad0
+            filt2d2 = F.pad(filt2d2, (pad0, pad1, pad0, pad1), mode='constant', value=0.0)
         return filt2d - filt2d2
 
 
