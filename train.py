@@ -42,9 +42,9 @@ def train(data_dir,outdir,batch_size=32,resolution=256,latent_dim=512,r1_gamma=1
         pin_memory=True
     )
 
-    G = get_generator(latent_dim=latent_dim, style_dim=latent_dim).to(device)
+    G = get_generator(l_dim=latent_dim, s_dim=latent_dim).to(device)
     D = get_discriminator().to(device)
-    G_ema = get_generator(latent_dim=latent_dim, style_dim=latent_dim).to(device)
+    G_ema = get_generator(l_dim=latent_dim, s_dim=latent_dim).to(device)
     G_ema.load_state_dict(G.state_dict())
     for p in G_ema.parameters():
         p.requires_grad_(False)
