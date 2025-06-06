@@ -318,11 +318,17 @@ def image_space_filter_and_corrupt(Y, p):
         g = g * t_norm
 
     # Build combined bandpass kernel H0 and apply separable conv
-    def make_bp_kernel(bp, max_kh, max_kw):
-        kh, kw = bp.shape
-        bp_kernel = bp.unsqueeze(0).unsqueeze(0)
-        bp_tiled = bp_kernel.repeat(3, 1, 1, 1)
-        return F.pad(bp_tiled, (0, max_kw - kw, 0, max_kh - kh), mode='constant', value=0.0)
+    def make_bp_kernel(bp, target_h, target_w):
+        h, w = bp.shape
+        pad_h = target_h - h
+        pad_w = target_w - w
+        pad_top = pad_h // 2
+        pad_bot = pad_h - pad_top
+        pad_left = pad_w // 2
+        pad_right = pad_w - pad_left
+        bp_padded = F.pad(bp, (pad_left, pad_right, pad_top, pad_bot), mode='constant', value=0.0)
+        bp_3ch = bp_padded.unsqueeze(0).repeat(3, 1, 1)
+        return bp_3ch
 
     max_kh = max(bp.shape[0] for bp in bandpasses)
     max_kw = max(bp.shape[1] for bp in bandpasses)
