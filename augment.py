@@ -274,15 +274,27 @@ def image_space_filter_and_corrupt(Y, p):
     # Build 4 bandpass filters by dilating a 2-tap lowpass
     low1d = torch.tensor([0.5, 0.5], device=device)
     def make_bandpass(dilate):
-        filt1d = torch.zeros((dilate * (low1d.shape[0] - 1) + 1,), device=device)
+        L = low1d.shape[0]
+        size1 = dilate * (L - 1) + 1
+        filt1d = torch.zeros((size1,), device=device)
         filt1d[::dilate] = low1d
         filt2d = filt1d.unsqueeze(1) @ filt1d.unsqueeze(0)
         filt2d = filt2d / filt2d.sum()
-        filt1d2 = torch.zeros((dilate*2 * (low1d.shape[0] - 1) + 1,), device=device)
-        filt1d2[::(dilate*2)] = low1d
+        size2 = (dilate * 2) * (L - 1) + 1
+        filt1d2 = torch.zeros((size2,), device=device)
+        filt1d2[::(dilate * 2)] = low1d
         filt2d2 = filt1d2.unsqueeze(1) @ filt1d2.unsqueeze(0)
         filt2d2 = filt2d2 / filt2d2.sum()
+        if size1 < size2:
+            diff = size2 - size1
+            pad = diff // 2
+            filt2d = F.pad(filt2d, (pad, pad, pad, pad), mode='constant', value=0.0)
+        elif size2 < size1:
+            diff = size1 - size2
+            pad = diff // 2
+            filt2d2 = F.pad(filt2d2, (pad, pad, pad, pad), mode='constant', value=0.0)
         return filt2d - filt2d2
+
 
     bp1 = make_bandpass(1)
     bp2 = make_bandpass(2)
