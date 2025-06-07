@@ -41,7 +41,7 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
         G.load_state_dict(ckpt[key], strict=True)
         G_ema.load_state_dict(ckpt[key], strict=True)
     if pretrained_d:
-        ckpt_d = torch.load(pretrained_d, map_location='cpu')
+        ckpt_d = torch.load(pretrained_d, map_location='cuda')
         D.load_state_dict(ckpt_d['D'], strict=True)
     if freeze_upto is not None:
         for idx in range(freeze_upto):
