@@ -80,6 +80,8 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
             fake_aug = fake_aug / 127.5 - 1.0
             print("+++++++++")
             D.train()
+            print("real", real_aug.device)
+            print("D", D.device)
             logits_real = D(real_aug)
             print("dic 1")
             logits_fake = D(fake_aug.detach())
