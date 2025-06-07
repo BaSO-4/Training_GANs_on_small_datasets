@@ -51,7 +51,7 @@ def train(data_dir,outdir,batch_size=32,resolution=256,latent_dim=512,r1_gamma=1
 
     if pretrained_g is not None:
         print(f"Loading pretrained Generator from {pretrained_g} …")
-        ckpt = torch.load(pretrained_g, map_location=device)
+        ckpt = torch.load(pretrained_g, map_location='cpu')
         if 'G_ema' in ckpt:
             G.load_state_dict(ckpt['G_ema'], strict=True)
             G_ema.load_state_dict(ckpt['G_ema'], strict=True)
@@ -102,7 +102,7 @@ def train(data_dir,outdir,batch_size=32,resolution=256,latent_dim=512,r1_gamma=1
 
             real_aug = augmentation(real_uint8, p).to(device)
 
-            z = torch.randn(B, latent_dim, device=device)
+            z = torch.randn(B, latent_dim, device='cpu')
             fake = G(z)
             fake_uint8 = ((fake.clamp(-1, 1) + 1) * 127.5).to(torch.uint8)
             fake_aug = augmentation(fake_uint8, p).to(device)
