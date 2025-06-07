@@ -42,16 +42,16 @@ def train(data_dir,outdir,batch_size=32,resolution=256,latent_dim=512,r1_gamma=1
         pin_memory=False
     )
 
-    G = get_generator(l_dim=latent_dim, s_dim=latent_dim).to('cpu')
-    D = get_discriminator().to(device)
-    G_ema = get_generator(l_dim=latent_dim, s_dim=latent_dim).to('cpu')
+    G = get_generator(l_dim=latent_dim, s_dim=latent_dim).to(device)
+    D = get_discriminator().to('cpu')
+    G_ema = get_generator(l_dim=latent_dim, s_dim=latent_dim).to(device)
     G_ema.load_state_dict(G.state_dict())
     for p in G_ema.parameters():
         p.requires_grad_(False)
 
     if pretrained_g is not None:
         print(f"Loading pretrained Generator from {pretrained_g} …")
-        ckpt = torch.load(pretrained_g, map_location='cpu')
+        ckpt = torch.load(pretrained_g, map_location=device)
         if 'G_ema' in ckpt:
             G.load_state_dict(ckpt['G_ema'], strict=True)
             G_ema.load_state_dict(ckpt['G_ema'], strict=True)
@@ -63,7 +63,7 @@ def train(data_dir,outdir,batch_size=32,resolution=256,latent_dim=512,r1_gamma=1
 
     if pretrained_d is not None:
         print(f"Loading pretrained Discriminator from {pretrained_d} …")
-        ckpt_d = torch.load(pretrained_d, map_location=device)
+        ckpt_d = torch.load(pretrained_d, map_location='cpu')
         if 'D' in ckpt_d:
             D.load_state_dict(ckpt_d['D'], strict=True)
         else:
@@ -100,12 +100,12 @@ def train(data_dir,outdir,batch_size=32,resolution=256,latent_dim=512,r1_gamma=1
             cur_nimg += B
             step += 1
 
-            real_aug = augmentation(real_uint8, p).to(device)
+            real_aug = augmentation(real_uint8, p).to('cpu')
 
-            z = torch.randn(B, latent_dim, device='cpu')
+            z = torch.randn(B, latent_dim, device=device)
             fake = G(z)
             fake_uint8 = ((fake.clamp(-1, 1) + 1) * 127.5).to(torch.uint8)
-            fake_aug = augmentation(fake_uint8, p).to(device)
+            fake_aug = augmentation(fake_uint8, p).to('cpu')
 
             logits_real = D(real_aug)
             logits_fake = D(fake_aug.detach())
@@ -127,10 +127,10 @@ def train(data_dir,outdir,batch_size=32,resolution=256,latent_dim=512,r1_gamma=1
             p = p + ada_alpha * (real_pred - tau)
             p = max(0.0, min(1.0, p))
 
-            z2 = torch.randn(B, latent_dim, device='cpu')
+            z2 = torch.randn(B, latent_dim, device=device)
             fake2 = G(z2)
             fake2_uint8 = ((fake2.clamp(-1, 1) + 1) * 127.5).to(torch.uint8)
-            fake2_aug = augmentation(fake2_uint8, p).to(device)
+            fake2_aug = augmentation(fake2_uint8, p).to('cpu')
 
             logits_fake2 = D(fake2_aug)
             loss_G = F.binary_cross_entropy_with_logits(logits_fake2, torch.ones_like(logits_fake2))
