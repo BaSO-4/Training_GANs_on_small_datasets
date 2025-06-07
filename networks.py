@@ -104,8 +104,14 @@ class Blur(nn.Module):
         self.register_buffer('kernel', kernel)
         self.pad = pad
 
-    def forward(self, x):
-        return F.conv2d(x, self.kernel.expand(x.shape[1], -1, -1, -1), padding=self.pad, groups=x.shape[1])
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        _, C, H, W = x.shape
+        kH, kW = self.kernel.shape[-2:]
+        pad_h, pad_w = self.pad
+        if (H + 2 * pad_h) < kH or (W + 2 * pad_w) < kW:
+            return x
+        kernel = self.kernel.expand(C, -1, -1, -1)
+        return F.conv2d(x, kernel, padding=self.pad, groups=C)
 
 
 class MappingNetwork(nn.Module):
