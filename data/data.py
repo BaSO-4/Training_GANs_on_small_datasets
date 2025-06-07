@@ -8,7 +8,7 @@ def prepare_flowers102(root_dir):
     Flowers102(root=root_dir, split="train", download=True, transform=transforms.ToTensor())
     print("Done.")
     
-    jpg_dir = os.path.join(root_dir, "flowers102", "jpg")
+    jpg_dir = os.path.join(root_dir, "flowers-102", "jpg")
     all_imgs = [f for f in os.listdir(jpg_dir) if f.lower().endswith(".jpg")]
     if len(all_imgs) < sample_size:
         raise ValueError(f"Only found {len(all_imgs)} images; need at least {sample_size}.")
