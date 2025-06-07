@@ -154,7 +154,8 @@ class Generator(nn.Module):
             if rgb is None:
                 rgb = rgb_new
             else:
-                rgb = F.interpolate(rgb, scale_factor=2, mode='nearest') + rgb_new
+                target_h, target_w = rgb_new.shape[-2:]
+                rgb = F.interpolate(rgb, size=(target_h, target_w), mode='nearest') + rgb_new
         return rgb
 
 
