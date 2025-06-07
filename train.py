@@ -76,10 +76,12 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
                 fake = G(z)
             fake_uint8_cpu = ((fake.clamp(-1,1) + 1) * 127.5).cpu().to(torch.uint8)
             fake_aug_cpu = augmentation(fake_uint8_cpu, p_aug)
-
+            print("+++++++++")
             D.train()
             logits_real = D(real_aug_cpu)
+            print("dic 1")
             logits_fake = D(fake_aug_cpu.detach())
+            print("disc 2")
             loss_D = F.binary_cross_entropy_with_logits(logits_real, torch.ones_like(logits_real)) + F.binary_cross_entropy_with_logits(logits_fake, torch.zeros_like(logits_fake))
             real_float_cpu = (real_uint8.to(torch.float32)/127.5 - 1.0)
             loss_D = loss_D + (r1_gamma/2.0) * compute_r1_penalty(D, real_float_cpu)
