@@ -41,7 +41,7 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
         G.load_state_dict(ckpt[key], strict=True)
         G_ema.load_state_dict(ckpt[key], strict=True)
     if pretrained_d:
-        ckpt_d = torch.load(pretrained_d, map_location='cuda')
+        ckpt_d = torch.load(pretrained_d, map_location='cpu')
         D.load_state_dict(ckpt_d['D'], strict=True)
     if freeze_upto is not None:
         for idx in range(freeze_upto):
@@ -74,13 +74,14 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
                 real_aug = real_aug_cpu.to('cuda', non_blocking=True)
                 z = torch.randn(B, latent_dim, device='cuda')
                 fake = G(z)
-            fake_uint8_cpu = ((fake.clamp(-1,1) + 1) * 127.5).cuda().to(torch.uint8)
+            fake_uint8_cpu = ((fake.clamp(-1,1) + 1) * 127.5).cpu().to(torch.uint8)
             fake_aug_cpu = augmentation(fake_uint8_cpu, p_aug)
+            fake_aug = fake_aug_cpu.to('cuda', non_blocking=True)
             print("+++++++++")
             D.train()
-            logits_real = D(real_aug_cpu)
+            logits_real = D(real_aug)
             print("dic 1")
-            logits_fake = D(fake_aug_cpu.detach())
+            logits_fake = D(fake_aug.detach())
             print("disc 2")
             loss_D = F.binary_cross_entropy_with_logits(logits_real, torch.ones_like(logits_real)) + F.binary_cross_entropy_with_logits(logits_fake, torch.zeros_like(logits_fake))
             real_float_cpu = (real_uint8.to(torch.float32)/127.5 - 1.0)
@@ -99,7 +100,7 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
             with torch.cuda.amp.autocast():
                 z2 = torch.randn(B, latent_dim, device='cuda')
                 fake2 = G(z2)
-            fake2_uint8_cpu = ((fake2.clamp(-1,1) + 1) * 127.5).cuda().to(torch.uint8)
+            fake2_uint8_cpu = ((fake2.clamp(-1,1) + 1) * 127.5).cpu().to(torch.uint8)
             fake2_aug_cpu = augmentation(fake2_uint8_cpu, p_aug)
             fake2_aug = fake2_aug_cpu.to('cuda', non_blocking=True)
             logits_fake2 = D(fake2_aug)
@@ -109,7 +110,7 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
             scaler.step(opt_G)
             scaler.update()
             update_ema(G, G_ema, ema_beta)
-            D.to('cuda')
+            D.to('cpu')
             torch.cuda.empty_cache()
 
             if step % log_interval == 0:
