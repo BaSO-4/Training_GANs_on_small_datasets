@@ -194,16 +194,16 @@ class DiscBlock(nn.Module):
 class Discriminator(nn.Module):
     def __init__(self, channels=[8,16,32,64,128,256,512,512]):
         super().__init__()
-        self.from_rgb = nn.Conv2d(3, channels[-1], 1)
+        self.from_rgb = nn.Conv2d(3, channels[-1], kernel_size=1)
         self.blocks = nn.ModuleList()
         in_c = channels[-1]
         for out_c in reversed(channels[:-1]):
             self.blocks.append(DiscBlock(in_c, out_c, downsample=True))
             in_c = out_c
-        self.final_conv = nn.Conv2d(in_c, in_c, 3, padding=1)
-        self.final_act = nn.LeakyReLU(0.2)
-        self.flatten = nn.Flatten()
-        self.fc = nn.Linear(in_c * 4 * 4, 1)
+        self.final_conv = nn.Conv2d(in_c, in_c, kernel_size=3, padding=1)
+        self.final_act  = nn.LeakyReLU(0.2)
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
+        self.fc      = nn.Linear(in_c, 1)
 
     def forward(self, x):
         x = self.from_rgb(x)           
