@@ -94,7 +94,7 @@ def train(data_dir,outdir,batch_size=32,resolution=256,latent_dim=512,r1_gamma=1
 
     while cur_nimg < total_kimg * 1000:
         for real_uint8, _ in loader:
-            real_uint8 = real_uint8.to(device)
+            real_uint8 = real_uint8.to('cpu')
             B = real_uint8.shape[0]
             cur_nimg += B
             step += 1
@@ -102,7 +102,7 @@ def train(data_dir,outdir,batch_size=32,resolution=256,latent_dim=512,r1_gamma=1
             real_aug = augmentation(real_uint8, p).to(device)
 
             z = torch.randn(B, latent_dim, device=device)
-            fake = G(z)
+            fake = G(z).to('cpu')
             fake_uint8 = ((fake.clamp(-1, 1) + 1) * 127.5).to(torch.uint8)
             fake_aug = augmentation(fake_uint8, p).to(device)
 
