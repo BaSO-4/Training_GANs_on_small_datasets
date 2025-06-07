@@ -211,6 +211,7 @@ class Discriminator(nn.Module):
             x = block(x)
         x = self.final_conv(x)
         x = self.final_act(x)
+        x = x.mean(dim=[2, 3])
         x = self.flatten(x)
         return self.fc(x)
 
