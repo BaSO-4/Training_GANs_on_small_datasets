@@ -70,12 +70,12 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
             step += 1
 
             real_aug_cpu = augmentation(real_uint8, p_aug)
-            real_aug = real_aug_cpu.to('cuda')
+            real_aug = real_aug_cpu.to('cuda', dtype=torch.float32) / 127.5 - 1.0
             z = torch.randn(B, latent_dim, device='cuda')
             fake = G(z)
             fake_uint8_cpu = ((fake.clamp(-1,1) + 1) * 127.5).cpu().to(torch.uint8)
             fake_aug_cpu = augmentation(fake_uint8_cpu, p_aug)
-            fake_aug = fake_aug_cpu.to('cuda')
+            fake_aug = fake_aug_cpu.to('cuda', dtype=torch.float32) / 127.5 - 1.0
             print("+++++++++")
             D.train()
             logits_real = D(real_aug)
