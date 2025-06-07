@@ -103,15 +103,17 @@ def train(data_dir,outdir,batch_size=32,resolution=256,latent_dim=512,r1_gamma=1
             step += 1
 
             real_aug = augmentation(real_uint8, p).to('cpu')
-
+            print("real augmented.")
             z = torch.randn(B, latent_dim, device=device)
             fake = G(z)
+            print("fake generated.")
             fake_uint8 = ((fake.clamp(-1, 1) + 1) * 127.5).to(torch.uint8)
             fake_aug = augmentation(fake_uint8, p).to('cpu')
-
+            print("fake augmented.")
             logits_real = D(real_aug)
+            print("disciriminator real.")
             logits_fake = D(fake_aug.detach())
-
+            print("disciriminator fake.")
             loss_D_real = F.binary_cross_entropy_with_logits(logits_real, torch.ones_like(logits_real))
             loss_D_fake = F.binary_cross_entropy_with_logits(logits_fake, torch.zeros_like(logits_fake))
             loss_D = loss_D_real + loss_D_fake
