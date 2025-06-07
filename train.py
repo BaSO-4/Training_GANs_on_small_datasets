@@ -70,10 +70,9 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
             step += 1
 
             real_aug_cpu = augmentation(real_uint8, p_aug)
-            with torch.cuda.amp.autocast():
-                real_aug = real_aug_cpu.to('cuda', non_blocking=True)
-                z = torch.randn(B, latent_dim, device='cuda')
-                fake = G(z)
+            real_aug = real_aug_cpu.to('cuda', non_blocking=True)
+            z = torch.randn(B, latent_dim, device='cuda')
+            fake = G(z)
             fake_uint8_cpu = ((fake.clamp(-1,1) + 1) * 127.5).cpu().to(torch.uint8)
             fake_aug_cpu = augmentation(fake_uint8_cpu, p_aug)
             fake_aug = fake_aug_cpu.to('cuda', non_blocking=True)
@@ -97,9 +96,8 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
             D.to('cuda')
             torch.cuda.empty_cache()
             G.train()
-            with torch.cuda.amp.autocast():
-                z2 = torch.randn(B, latent_dim, device='cuda')
-                fake2 = G(z2)
+            z2 = torch.randn(B, latent_dim, device='cuda')
+            fake2 = G(z2)
             fake2_uint8_cpu = ((fake2.clamp(-1,1) + 1) * 127.5).cpu().to(torch.uint8)
             fake2_aug_cpu = augmentation(fake2_uint8_cpu, p_aug)
             fake2_aug = fake2_aug_cpu.to('cuda', non_blocking=True)
