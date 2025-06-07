@@ -147,11 +147,11 @@ class Generator(nn.Module):
         x = self.initial_act(x)
         x = self.initial_conv(x, styles)
         x = self.initial_act(x)
-        rgb = 0
+        rgb = None
         for block, to_rgb in zip(self.blocks, self.to_rgb_layers):
             x = block(x, styles)
             rgb_new = to_rgb(x, styles)
-            if isinstance(rgb, int):
+            if rgb is None:
                 rgb = rgb_new
             else:
                 rgb = F.interpolate(rgb, scale_factor=2, mode='nearest') + rgb_new
