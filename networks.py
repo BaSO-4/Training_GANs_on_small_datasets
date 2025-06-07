@@ -206,14 +206,15 @@ class Discriminator(nn.Module):
         self.fc = nn.Linear(in_c * 4 * 4, 1)
 
     def forward(self, x):
-        x = self.from_rgb(x)
+        x = self.from_rgb(x)           
         for block in self.blocks:
-            x = block(x)
+            x = block(x)               
         x = self.final_conv(x)
         x = self.final_act(x)
-        x = x.mean(dim=[2, 3])
-        x = self.flatten(x)
-        return self.fc(x)
+        x = self.avgpool(x)           
+        x = x.view(x.size(0), -1)     
+        x = self.fc(x)                
+        return x
 
 
 def get_generator(l_dim=512, s_dim=512):
