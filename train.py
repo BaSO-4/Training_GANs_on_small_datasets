@@ -71,7 +71,6 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
 
             real_aug_cpu = augmentation(real_uint8, p_aug)
             with torch.cuda.amp.autocast():
-                real_aug = real_aug_cpu.to('cuda', non_blocking=True)
                 z = torch.randn(B, latent_dim, device='cuda')
                 fake = G(z)
             fake_uint8_cpu = ((fake.clamp(-1,1) + 1) * 127.5).cpu().to(torch.uint8)
