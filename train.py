@@ -91,10 +91,12 @@ def train(data_dir,outdir,batch_size=32,resolution=256,latent_dim=512,r1_gamma=1
     cur_nimg = 0
     step = 0
     start_time = time.time()
-
+    i = 0
     while cur_nimg < total_kimg * 1000:
         print(cur_nimg)
         for real_uint8, _ in loader:
+            print(i)
+            i += 1
             real_uint8 = real_uint8.to(device)
             B = real_uint8.shape[0]
             cur_nimg += B
