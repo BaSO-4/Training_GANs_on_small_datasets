@@ -70,12 +70,12 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
             step += 1
 
             real_aug_cpu = augmentation(real_uint8, p_aug)
-            real_aug = real_aug_cpu.to('cuda', non_blocking=True)
+            real_aug = real_aug_cpu.to('cuda')
             z = torch.randn(B, latent_dim, device='cuda')
             fake = G(z)
             fake_uint8_cpu = ((fake.clamp(-1,1) + 1) * 127.5).cpu().to(torch.uint8)
             fake_aug_cpu = augmentation(fake_uint8_cpu, p_aug)
-            fake_aug = fake_aug_cpu.to('cuda', non_blocking=True)
+            fake_aug = fake_aug_cpu.to('cuda')
             print("+++++++++")
             D.train()
             logits_real = D(real_aug)
@@ -100,7 +100,7 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
             fake2 = G(z2)
             fake2_uint8_cpu = ((fake2.clamp(-1,1) + 1) * 127.5).cpu().to(torch.uint8)
             fake2_aug_cpu = augmentation(fake2_uint8_cpu, p_aug)
-            fake2_aug = fake2_aug_cpu.to('cuda', non_blocking=True)
+            fake2_aug = fake2_aug_cpu.to('cuda')
             logits_fake2 = D(fake2_aug)
             loss_G = F.binary_cross_entropy_with_logits(logits_fake2, torch.ones_like(logits_fake2))
             opt_G.zero_grad()
