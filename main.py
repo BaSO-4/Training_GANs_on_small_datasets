@@ -17,7 +17,7 @@ if __name__ == "__main__":
     parser.add_argument('--r1',           type=float, default=10.0, help='R1 regularization weight')
     parser.add_argument('--ema',          type=float, default=0.999, help='EMA decay for generator')
     parser.add_argument('--lr',           type=float, default=2.5e-4, help='Learning rate for G and D')
-    parser.add_argument('--total_kimg',   type=int, default=2500, help='Total thousands of images to train on')
+    parser.add_argument('--total_kimg',   type=int, default=5, help='Total thousands of images to train on')
     parser.add_argument('--ada_target',   type=float, default=0.6, help='ADA target real accuracy')
     parser.add_argument('--ada_interval', type=int, default=4, help='ADA update interval (D steps)')
     parser.add_argument('--ada_kimg',     type=float, default=500, help='ADA adjustment speed (kimg)')

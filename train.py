@@ -59,8 +59,12 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
     step = 0
     start = time.time()
     scaler = torch.cuda.amp.GradScaler()
+    i = 1
     while cur_nimg < total_kimg * 1000:
+        print("current: ", cur_nimg)
         for real_uint8, _ in loader:
+            print(i)
+            i += 1
             B = real_uint8.size(0)
             cur_nimg += B
             step += 1
