@@ -42,9 +42,9 @@ def train(data_dir,outdir,batch_size=32,resolution=256,latent_dim=512,r1_gamma=1
         pin_memory=False
     )
 
-    G = get_generator(l_dim=latent_dim, s_dim=latent_dim).to(device)
+    G = get_generator(l_dim=latent_dim, s_dim=latent_dim).to('cpu')
     D = get_discriminator().to(device)
-    G_ema = get_generator(l_dim=latent_dim, s_dim=latent_dim).to(device)
+    G_ema = get_generator(l_dim=latent_dim, s_dim=latent_dim).to('cpu')
     G_ema.load_state_dict(G.state_dict())
     for p in G_ema.parameters():
         p.requires_grad_(False)
@@ -127,7 +127,7 @@ def train(data_dir,outdir,batch_size=32,resolution=256,latent_dim=512,r1_gamma=1
             p = p + ada_alpha * (real_pred - tau)
             p = max(0.0, min(1.0, p))
 
-            z2 = torch.randn(B, latent_dim, device=device)
+            z2 = torch.randn(B, latent_dim, device='cpu')
             fake2 = G(z2)
             fake2_uint8 = ((fake2.clamp(-1, 1) + 1) * 127.5).to(torch.uint8)
             fake2_aug = augmentation(fake2_uint8, p).to(device)
