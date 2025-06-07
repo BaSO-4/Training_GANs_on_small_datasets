@@ -85,8 +85,9 @@ def train(data_dir, outdir, batch_size=32, resolution=256, latent_dim=512, r1_ga
             real_float_cpu = (real_uint8.to(torch.float32)/127.5 - 1.0)
             loss_D = loss_D + (r1_gamma/2.0) * compute_r1_penalty(D, real_float_cpu)
             opt_D.zero_grad()
-            loss_D.backward()
-            opt_D.step()
+            scaler.scale(loss_D).backward()
+            scaler.step(opt_D)
+            scaler.update()
 
             with torch.no_grad():
                 real_pred = (logits_real > 0).float().mean().item()
