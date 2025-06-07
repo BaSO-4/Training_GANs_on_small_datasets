@@ -181,9 +181,13 @@ class DiscBlock(nn.Module):
         x = self.act1(x)
         x = self.conv2(x)
         x = self.act2(x)
+
         if self.downsample:
             x = self.blur(x)
-            x = F.avg_pool2d(x, 2)
+            H, W = x.shape[-2], x.shape[-1]
+            if H >= 2 and W >= 2:
+                x = F.avg_pool2d(x, kernel_size=2)
+
         return x
 
 
