@@ -1,177 +1,239 @@
 import torch
 import torch.nn.functional as F
-import math, random
+from math import pi, sin, cos, log, sqrt
 
-def augment(image_uint8: torch.Tensor, p: float) -> torch.Tensor:
-    B, C, H, W = image_uint8.shape
-    device = image_uint8.device
 
-    image = image_uint8.float() / 127.5 - 1.0
+def transformations(Y, p):
+    device = Y.device
+    B, C, H, W = Y.shape
 
-    def get_affine_matrix():
-        G = torch.eye(3, device=device)
+    G = torch.eye(3, device=device)
 
-        def apply_prob(fn):
-            return fn() if torch.rand(1) < p else torch.eye(3, device=device)
+    # pixel blitting
+    if torch.rand(1).item() < p:
+        i = torch.randint(0, 2, ()).item()
+        G = torch.tensor([
+            [1-2*i, 0, 0],
+            [ 0, 1, 0],
+            [ 0, 0, 1]
+        ], device=device, dtype=torch.float32) @ G
 
-        # Flip X
-        G = apply_prob(lambda: torch.tensor([[ -1, 0, 0], [0, 1, 0], [0, 0, 1]], device=device, dtype=torch.float32)) @ G
-
-        # Rotate 90° * k
-        G = apply_prob(lambda: {
-            0: torch.eye(3, device=device, dtype=torch.float32),
-            1: torch.tensor([[0, -1, 0], [1, 0, 0], [0, 0, 1]], device=device, dtype=torch.float32),
-            2: torch.tensor([[-1, 0, 0], [0, -1, 0], [0, 0, 1]], device=device, dtype=torch.float32),
-            3: torch.tensor([[0, 1, 0], [-1, 0, 0], [0, 0, 1]], device=device, dtype=torch.float32),
-        }[random.randint(0, 3)]) @ G
-
-        # Integer translation
-        G = apply_prob(lambda: torch.tensor([
-            [1, 0, round(random.uniform(-0.125, 0.125) * W)],
-            [0, 1, round(random.uniform(-0.125, 0.125) * H)],
+    # rotations
+    if torch.rand(1).item() < p:
+        i = torch.randint(0, 4, ()).item()
+        theta = -pi / 2 * i
+        G = torch.tensor([
+            [cos(theta), -sin(theta), 0],
+            [sin(theta), cos(theta), 0],
             [0, 0, 1]
-        ], dtype=torch.float32, device=device)) @ G
+        ], device=device, dtype=torch.float32) @ G
 
-        # Isotropic scaling
-        G = apply_prob(lambda: torch.tensor([
-            [s := torch.distributions.LogNormal(0, 0.2 * math.log(2)).sample().item(), 0, 0],
+    # translation
+    if torch.rand(1).item() < p:
+        tx = torch.round(torch.rand(1, device=device) * 0.25 - 0.125).item() * W
+        ty = torch.round(torch.rand(1, device=device) * 0.25 - 0.125).item() * H
+        G = torch.tensor([
+            [1, 0, tx],
+            [0, 1, ty],
+            [0, 0, 1]
+        ], device=device, dtype=torch.float32) @ G
+
+    # isotropic scaling
+    if torch.rand(1).item() < p:
+        s = torch.distributions.LogNormal(0.0, (0.2 * log(2))).sample().item()
+        G = torch.tensor([
+            [s, 0, 0],
             [0, s, 0],
             [0, 0, 1]
-        ], device=device)) @ G
+        ], device=device, dtype=torch.float32) @ G
 
-        # Pre-rotation
-        prot = 1 - math.sqrt(1 - p)
-        if torch.rand(1).item() < prot:
-            theta = random.uniform(-math.pi, math.pi)
-            R = torch.tensor([
-                [math.cos(-theta), -math.sin(-theta), 0],
-                [math.sin(-theta), math.cos(-theta), 0],
-                [0, 0, 1]
-            ], device=device)
-            G = R @ G
+    p_rot = 1 - torch.sqrt(torch.tensor(1 - p, device=device))
 
-        # Anisotropic scaling
-        G = apply_prob(lambda: torch.tensor([
-            [s := torch.distributions.LogNormal(0, 0.2 * math.log(2)).sample().item(), 0, 0],
+    # pre rotation
+    if torch.rand(1).item() < p_rot:
+        theta = (torch.rand(1, device=device) * 2 * pi) - pi
+        G = torch.tensor([
+            [cos(-theta), -sin(-theta), 0],
+            [sin(-theta), cos(-theta), 0],
+            [0, 0, 1]
+        ], device=device, dtype=torch.float32) @ G
+
+    # anisotropic scaling
+    if torch.rand(1).item() < p:
+        s = torch.distributions.LogNormal(0.0, (0.2 * log(2))).sample().item()
+        G = torch.tensor([
+            [s, 0, 0],
             [0, 1/s, 0],
             [0, 0, 1]
-        ], device=device)) @ G
+        ], device=device, dtype=torch.float32) @ G
 
-        # Post-rotation
-        if torch.rand(1).item() < prot:
-            theta = random.uniform(-math.pi, math.pi)
-            R = torch.tensor([
-                [math.cos(-theta), -math.sin(-theta), 0],
-                [math.sin(-theta), math.cos(-theta), 0],
-                [0, 0, 1]
-            ], device=device)
-            G = R @ G
-
-        # Fractional translation
-        G = apply_prob(lambda: torch.tensor([
-            [1, 0, random.gauss(0, 0.125) * W],
-            [0, 1, random.gauss(0, 0.125) * H],
+    # post rotation
+    if torch.rand(1).item() < p_rot:
+        theta = (torch.rand(1, device=device) * 2 * pi) - pi
+        G = torch.tensor([
+            [cos(-theta), -sin(-theta), 0],
+            [sin(-theta), cos(-theta), 0],
             [0, 0, 1]
-        ], device=device)) @ G
+        ], device=device, dtype=torch.float32) @ G
 
-        return G[:2, :]
+    # fractional translation
+    if torch.rand(1).item() < p:
+        tx = torch.round(torch.rand(1, device=device) * 0.125).item() * W
+        ty = torch.round(torch.rand(1, device=device) * 0.125).item() * H
+        G = torch.tensor([
+            [1, 0, tx],
+            [0, 1, ty],
+            [0, 0, 1]
+        ], device=device, dtype=torch.float32) @ G
 
-    # Apply affine transform
-    affine_matrices = torch.stack([get_affine_matrix() for _ in range(B)])
-    grid = F.affine_grid(affine_matrices, image.size(), align_corners=False)
-    image = F.grid_sample(image, grid, padding_mode='reflection', align_corners=False)
+    # pad image and adjust origin
+    filter_size = 12
+    pad_x = pad_y = filter_size // 2
+    m_lo = torch.tensor([pad_x, pad_y], device=device, dtype=torch.uint8)
+    m_hi = torch.tensor([pad_x, pad_y], device=device, dtype=torch.uint8)
+    Y = F.pad(Y, [pad_x, pad_x, pad_y, pad_y], mode='reflect')
+    cx = W / 2 - 0.5 + pad_x
+    cy = H / 2 - 0.5 + pad_y
+    T = torch.tensor([
+        [1, 0, cx],
+        [0, 1, cy],
+        [0, 0, 1]
+    ], device=device, dtype=torch.float32)
+    G = T @ G @ torch.inverse(T)
 
-    # Color transformations
-    def apply_color(image):
-        def apply_prob(fn):
-            return fn(image) if torch.rand(1) < p else image
+    # execute geometric transformations
+    Y = F.interpolate(Y, scale_factor=2, mode='bilinear', align_corners=False)
+    S = torch.tensor([
+        [2, 0, 0],
+        [0, 2, 0],
+        [0, 0, 1]
+    ], device=G.device, dtype=torch.float32)
+    G = S @ G @ torch.inverse(S)
+    affine = G[:2, :].unsqueeze(0).repeat(B, 1, 1)
+    grid = F.affine_grid(affine, size=Y.size(), align_corners=False)
+    Y = F.grid_sample(Y, grid, mode='bilinear', padding_mode='reflection', align_corners=False)
+    Y = F.avg_pool2d(Y, kernel_size=2, stride=2)
+    pad = filter_size // 2
+    Y = Y[:, :, pad:-pad, pad:-pad]
+    # x0, y0 = m_lo
+    # x1, y1 = Y.shape[-1] - m_hi[0], Y.shape[-2] - m_hi[1]
+    # Y = Y[:, :, y0:y1, x0:x1]
 
-        # Brightness
-        image = apply_prob(lambda img: img + torch.randn(1, device=device).item() * 0.2)
 
-        # Contrast
-        image = apply_prob(lambda img: img * torch.distributions.LogNormal(0, 0.5 * math.log(2)).sample().item())
+    C = torch.eye(4, device=device)
 
-        # Luma flip
-        v = torch.tensor([1.0, 1.0, 1.0], device=device) / math.sqrt(3)
-        if torch.rand(1) < p:
-            H = torch.eye(3, device=device) - 2 * v[:, None] @ v[None, :]
-            image = image.permute(0, 2, 3, 1)
-            image = image @ H.T
-            image = image.permute(0, 3, 1, 2)
+    # brightness
+    if torch.rand(1).item() < p:
+        b = torch.randn(1, device=device) * 0.2
+        C = torch.tensor([
+            [1, 0, 0, b.item()],
+            [0, 1, 0, b.item()],
+            [0, 0, 1, b.item()],
+            [0, 0, 0, 1]
+        ], device=device, dtype=torch.float32) @ C
 
-        # Hue rotation
-        if torch.rand(1) < p:
-            theta = random.uniform(-math.pi, math.pi)
-            K = torch.tensor([
-                [0, -v[2], v[1]],
-                [v[2], 0, -v[0]],
-                [-v[1], v[0], 0]
-            ], device=device)
-            R = torch.eye(3, device=device) + math.sin(theta) * K + (1 - math.cos(theta)) * K @ K
-            image = image.permute(0, 2, 3, 1)
-            image = image @ R.T
-            image = image.permute(0, 3, 1, 2)
+    # contrast
+    if torch.rand(1).item() < p:
+        c = torch.distributions.LogNormal(0.0, (0.5 * log(2))).sample().item()
+        C = torch.tensor([
+            [c, 0, 0, 0],
+            [0, c, 0, 0],
+            [0, 0, c, 0],
+            [0, 0, 0, 1]
+        ], device=device, dtype=torch.float32) @ C
 
-        # Saturation
-        if torch.rand(1) < p:
-            image = (image.permute(0, 2, 3, 1) @ (
-                    v[:, None] @ v[None, :] +
-                    (torch.eye(3, device=device) - v[:, None] @ v[None, :]) *
-                    torch.distributions.LogNormal(0, math.log(2)).sample().item()
-                ).T).permute(0, 3, 1, 2)
-        return image
+    v = torch.tensor([1, 1, 1, 0], device=device) / sqrt(3)
 
-    image = apply_color(image)
+    # luma flip
+    if torch.rand(1).item() < p:
+        i = torch.randint(0, 2, ()).item()
+        C = (torch.eye(4, device=device) - 2 * torch.outer(v, v) * i) @ C
 
-  # image space filtering
-    bands = [0, math.pi/8, math.pi/4, math.pi/2]
+    # hue rotation
+    if torch.rand(1).item() < p:
+        theta = (torch.rand(1, device=device) * 2 * pi) - pi
+        C = torch.tensor([
+            [0, -v[2], v[1], 0],
+            [v[2], 0, -v[0], 0],
+            [-v[1], v[0], 0, 0],
+            [0, 0, 0, 1]
+        ], device=device, dtype=torch.float32) @ C
+
+    # saturation
+    if torch.rand(1).item() < p:
+        s = torch.distributions.LogNormal(0.0, (log(2))).sample().item()
+        C = (torch.outer(v, v) + (torch.eye(4, device=device) - torch.outer(v, v)) * s) @ C
+
+    # execute color transformations
+    Y = Y.permute(0, 2, 3, 1).reshape(-1, 3)
+    ones = torch.ones((Y.shape[0], 1), device=Y.device)
+    Y = torch.cat([Y, ones], dim=1)
+    Y = Y @ C.T
+    Y = Y[:, :3]
+    Y = Y.view(B, H, W, 3).permute(0, 3, 1, 2)
+    return Y
+
+def corruptions(Y, p):
+    B, C, H, W = Y.shape
+    device = Y.device
+    b = torch.tensor([[0, pi/8], [pi/8, pi/4], [pi/4, pi/2], [pi/2, pi]], device=device)
     g = torch.ones(4, device=device)
-    lambdas = torch.tensor([10, 1, 1, 1], device=device) / 13
+    lmbd = torch.tensor([10, 1, 1, 1], device=device) / 13
 
-    for i, b in enumerate(bands):
+    for i in range(4):
         if torch.rand(1).item() < p:
             t = torch.ones(4, device=device)
-            t[i] = torch.distributions.LogNormal(0, math.log(2)).sample().to(device)
-            t = t / torch.sqrt(torch.sum((lambdas * t ** 2)))
-            g *= t
+            t[i] = torch.distributions.LogNormal(0.0, (log(2))).sample().item()
+            t = t / sqrt(torch.dot(lmbd, torch.pow(t, 2)))
+            g = g * t
 
-    def gaussian_bandpass_filter(img, sigma):
-        k = int(4 * sigma + 1)
-        padding = k // 2
-        gauss = torch.arange(-padding, padding + 1, device=img.device, dtype=torch.float32)
-        gauss = torch.exp(-0.5 * (gauss / sigma) ** 2)
-        gauss = gauss / gauss.sum()
-        gauss = gauss.view(1, 1, -1).repeat(img.size(1), 1, 1)
-        img = F.pad(img, (padding, padding, padding, padding), mode='reflect')
-        img = F.conv2d(img, gauss.unsqueeze(2), groups=img.size(1))
-        img = F.conv2d(img, gauss.unsqueeze(3), groups=img.size(1))
-        return img
+    def gaussian_kernel_2d(kernel_size=5, sigma=1.0, device='cpu'):
+        ax = torch.arange(-kernel_size // 2 + 1., kernel_size // 2 + 1., device=device)
+        xx, yy = torch.meshgrid(ax, ax, indexing='ij')
+        kernel = torch.exp(-(xx**2 + yy**2) / (2. * sigma**2))
+        kernel = kernel / kernel.sum()
+        return kernel
 
-    band_sigmas = [2.0, 1.0, 0.5, 0.25]
-    filtered = sum(gaussian_bandpass_filter(image, sigma) * gain
-                   for sigma, gain in zip(band_sigmas, g))
-    image = filtered
+    # execute image-space filtering
+    H_z = gaussian_kernel_2d(device=device)
+    g = torch.tensor([1.0, 0.5, 0.25, 0.1], device=device)
+    H_z_prime = torch.zeros_like(H_z, device=device)
+    for i in range(4):
+        y = torch.arange(H_z.shape[0], device=device, dtype=torch.float32)
+        x = torch.arange(H_z.shape[1], device=device, dtype=torch.float32)
+        Ys, Xs = torch.meshgrid(y, x, indexing='ij')
+        phase = b[i][0] * Xs + b[i][1] * Ys
+        modulation = torch.cos(phase)
+        bandpassed = H_z * modulation
+        H_z_prime += bandpassed * g[i]
+    m_lo, m_hi = H_z.shape[0] // 2, H_z.shape[1] // 2
+    Y = F.pad(Y, (m_lo, m_hi, m_lo, m_hi), mode='reflect')
+    H_z_prime = H_z_prime.view(1, 1, H_z_prime.shape[0], H_z_prime.shape[1])
+    Y = F.conv2d(Y, weight=H_z_prime.expand(C, 1, -1, -1), groups=C, padding=(m_lo, m_hi))
+    Y = Y[:, :, m_lo:-m_hi, m_lo:-m_hi]
 
     # additive rgb noise
     if torch.rand(1).item() < p:
-        sigma = torch.distributions.HalfNormal(0.1).sample().item()
-        noise = torch.randn_like(image) * sigma
-        image = image + noise
+        sig = torch.abs(torch.randn(1, device=device)) * 0.1
+        noise = torch.randn_like(Y) * sig
+        Y = Y + noise
+        Y = Y.clamp(-1, 1)
 
     # cutout
     if torch.rand(1).item() < p:
-        B, C, H, W = image.shape
-        cx = torch.randint(W, (1,)).item()
-        cy = torch.randint(H, (1,)).item()
-        cut_w = W // 2
-        cut_h = H // 2
-        x1 = max(0, cx - cut_w // 2)
-        y1 = max(0, cy - cut_h // 2)
-        x2 = min(W, cx + cut_w // 2)
-        y2 = min(H, cy + cut_h // 2)
-        mask = torch.ones_like(image)
-        mask[:, :, y1:y2, x1:x2] = 0
-        image = image * mask
+        cx = torch.rand(B, device=device)
+        cy = torch.rand(B, device=device)
+        r_lo_x = torch.round((cx - 0.25) * W).clamp(0, W - 1).long()
+        r_lo_y = torch.round((cy - 0.25) * H).clamp(0, H - 1).long()
+        r_hi_x = torch.round((cx + 0.25) * W).clamp(0, W).long()
+        r_hi_y = torch.round((cy + 0.25) * H).clamp(0, H).long()
+        mask = torch.ones_like(Y, device=device)
+        for i in range(B):
+            mask[i, :, r_lo_y[i]:r_hi_y[i], r_lo_x[i]:r_hi_x[i]] = 0
+        Y = Y * mask
+    return Y
 
-    return torch.clamp(image, -1.0, 1.0)
+def augment(image, p):
+    image = transformations(image, p)
+    image = corruptions(image, p)
+    return image
