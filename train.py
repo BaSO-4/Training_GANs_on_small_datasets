@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torch import optim
 from torch.utils.data import DataLoader
 from torchvision import transforms, datasets
+import matplotlib.pyplot as plt
 from networks import get_generator, get_discriminator
 from augment import augment
 
