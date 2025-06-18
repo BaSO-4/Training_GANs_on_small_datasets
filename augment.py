@@ -115,7 +115,7 @@ def augment(image_uint8: torch.Tensor, p: float) -> torch.Tensor:
 
         # Saturation
         if torch.rand(1) < p:
-            image = (img.permute(0, 2, 3, 1) @ (
+            image = (image.permute(0, 2, 3, 1) @ (
                     v[:, None] @ v[None, :] +
                     (torch.eye(3, device=device) - v[:, None] @ v[None, :]) *
                     torch.distributions.LogNormal(0, math.log(2)).sample().item()
