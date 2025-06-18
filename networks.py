@@ -19,7 +19,7 @@ blur_kernel = blur_kernel[None, None]
 
 
 class ModulatedConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, style_dim,demodulate=True, eps=1e-8):
+    def __init__(self, in_channels, out_channels, kernel_size, style_dim, demodulate=True, eps=1e-8):
         super().__init__()
         self.eps = eps
         self.kernel_size = kernel_size
@@ -53,13 +53,30 @@ class ModulatedConv2d(nn.Module):
 class NoiseInjection(nn.Module):
     def __init__(self, channels):
         super().__init__()
-        self.weight = nn.Parameter(torch.zeros(channels))
+        self.weight = nn.Parameter(0.1 * torch.ones(channels))
 
     def forward(self, x, noise=None):
         if noise is None:
             batch, _, height, width = x.shape
             noise = torch.randn(batch, 1, height, width, device=x.device)
         return x + self.weight.view(1, -1, 1, 1) * noise
+
+
+class Blur(nn.Module):
+    def __init__(self, kernel):
+        super().__init__()
+        self.register_buffer('kernel', kernel)
+        pad = (kernel.shape[-1] - 1) // 2
+        self.pad = (pad, pad)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        _, C, H, W = x.shape
+        kH, kW = self.kernel.shape[-2:]
+        pad_h, pad_w = self.pad
+        if (H + 2 * pad_h) < kH or (W + 2 * pad_w) < kW:
+            return x
+        kernel = self.kernel.expand(C, -1, -1, -1)
+        return F.conv2d(x, kernel, padding=self.pad, groups=C)
 
 
 class GenBlock(nn.Module):
@@ -74,7 +91,7 @@ class GenBlock(nn.Module):
         self.conv2 = ModulatedConv2d(out_channels, out_channels, 3, style_dim)
         self.noise2 = NoiseInjection(out_channels)
         self.act2 = nn.LeakyReLU(0.2)
-        self.to_rgb = ModulatedConv2d(out_channels, 3, 1, style_dim, demodulate=False)
+        # Removed self.to_rgb here as it's unused
 
     def forward(self, x, style, noise=None):
         if self.upsample:
@@ -98,28 +115,15 @@ class ToRGB(nn.Module):
         return self.conv(x, style)
 
 
-class Blur(nn.Module):
-    def __init__(self, kernel, pad=(1,1)):
-        super().__init__()
-        self.register_buffer('kernel', kernel)
-        self.pad = pad
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        _, C, H, W = x.shape
-        kH, kW = self.kernel.shape[-2:]
-        pad_h, pad_w = self.pad
-        if (H + 2 * pad_h) < kH or (W + 2 * pad_w) < kW:
-            return x
-        kernel = self.kernel.expand(C, -1, -1, -1)
-        return F.conv2d(x, kernel, padding=self.pad, groups=C)
-
-
 class MappingNetwork(nn.Module):
     def __init__(self, latent_dim, style_dim, num_layers=8):
         super().__init__()
         layers = []
-        for _ in range(num_layers):
-            layers.append(nn.Linear(latent_dim, latent_dim))
+        # Map latent_dim -> style_dim in first layer
+        layers.append(nn.Linear(latent_dim, style_dim))
+        layers.append(nn.LeakyReLU(0.2))
+        for _ in range(num_layers - 1):
+            layers.append(nn.Linear(style_dim, style_dim))
             layers.append(nn.LeakyReLU(0.2))
         self.mapping = nn.Sequential(*layers)
 
@@ -141,7 +145,7 @@ class Generator(nn.Module):
 
         in_c = channels[0]
         for out_c in channels:
-            self.blocks.append(GenBlock(in_c, out_c, style_dim, upsample=(in_c!=out_c)))
+            self.blocks.append(GenBlock(in_c, out_c, style_dim, upsample=(in_c != out_c)))
             self.to_rgb_layers.append(ToRGB(out_c, style_dim))
             in_c = out_c
 
@@ -162,7 +166,7 @@ class Generator(nn.Module):
             else:
                 target_h, target_w = rgb_new.shape[-2:]
                 rgb = F.interpolate(rgb, size=(target_h, target_w), mode='nearest') + rgb_new
-        return rgb
+        return torch.tanh(rgb)  # tanh output in [-1,1]
 
 
 class DiscBlock(nn.Module):
@@ -206,14 +210,14 @@ class Discriminator(nn.Module):
         self.fc      = nn.Linear(in_c, 1)
 
     def forward(self, x):
-        x = self.from_rgb(x)           
+        x = self.from_rgb(x)
         for block in self.blocks:
-            x = block(x)               
+            x = block(x)
         x = self.final_conv(x)
         x = self.final_act(x)
-        x = self.avgpool(x)           
-        x = x.view(x.size(0), -1)     
-        x = self.fc(x)                
+        x = self.avgpool(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
         return x
 
 
