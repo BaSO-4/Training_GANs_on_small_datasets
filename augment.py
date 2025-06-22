@@ -115,9 +115,6 @@ def transformations(Y, p):
     Y = F.avg_pool2d(Y, kernel_size=2, stride=2)
     pad = filter_size // 2
     Y = Y[:, :, pad:-pad, pad:-pad]
-    # x0, y0 = m_lo
-    # x1, y1 = Y.shape[-1] - m_hi[0], Y.shape[-2] - m_hi[1]
-    # Y = Y[:, :, y0:y1, x0:x1]
 
 
     C = torch.eye(4, device=device)

@@ -1,229 +1,299 @@
-import math
 import torch
 from torch import nn
-from torch.nn import functional as F
-
-def make_noise(batch, resolution, device):
-    return torch.randn(batch, 1, resolution, resolution, device=device)
-
-blur_kernel = [1, 3, 3, 1]
-
-def normalize_kernel(kernel):
-    kernel = torch.tensor(kernel, dtype=torch.float32)
-    kernel = kernel[:, None] * kernel[None, :]
-    kernel = kernel / kernel.sum()
-    return kernel
-
-blur_kernel = normalize_kernel(blur_kernel)
-blur_kernel = blur_kernel[None, None]
-
-
-class ModulatedConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, style_dim, demodulate=True, eps=1e-8):
-        super().__init__()
-        self.eps = eps
-        self.kernel_size = kernel_size
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.demodulate = demodulate
-
-        fan_in = in_channels * kernel_size * kernel_size
-        self.scale = 1 / math.sqrt(fan_in)
-        self.weight = nn.Parameter(
-            torch.randn(1, out_channels, in_channels, kernel_size, kernel_size)
-        )
-        self.style = nn.Linear(style_dim, in_channels)
-
-    def forward(self, x, style):
-        N, C, H, W = x.shape
-        style = self.style(style).view(N, 1, C, 1, 1)
-        weight = self.weight * self.scale
-        weight = weight * style
-        if self.demodulate:
-            demod = torch.rsqrt((weight ** 2).sum([2, 3, 4]) + self.eps)
-            weight = weight * demod.view(N, self.out_channels, 1, 1, 1)
-        weight = weight.view(N * self.out_channels, self.in_channels, self.kernel_size, self.kernel_size)
-        x = x.view(1, N * self.in_channels, H, W)
-        padding = self.kernel_size // 2
-        out = F.conv2d(x, weight, padding=padding, groups=N)
-        out = out.view(N, self.out_channels, H, W)
-        return out
-
-
-class NoiseInjection(nn.Module):
-    def __init__(self, channels):
-        super().__init__()
-        self.weight = nn.Parameter(0.1 * torch.ones(channels))
-
-    def forward(self, x, noise=None):
-        if noise is None:
-            batch, _, height, width = x.shape
-            noise = torch.randn(batch, 1, height, width, device=x.device)
-        return x + self.weight.view(1, -1, 1, 1) * noise
-
-
-class Blur(nn.Module):
-    def __init__(self, kernel):
-        super().__init__()
-        self.register_buffer('kernel', kernel)
-        pad = (kernel.shape[-1] - 1) // 2
-        self.pad = (pad, pad)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        _, C, H, W = x.shape
-        kH, kW = self.kernel.shape[-2:]
-        pad_h, pad_w = self.pad
-        if (H + 2 * pad_h) < kH or (W + 2 * pad_w) < kW:
-            return x
-        kernel = self.kernel.expand(C, -1, -1, -1)
-        return F.conv2d(x, kernel, padding=self.pad, groups=C)
-
-
-class GenBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, style_dim, upsample=True):
-        super().__init__()
-        self.upsample = upsample
-        if upsample:
-            self.blur = Blur(blur_kernel)
-        self.conv1 = ModulatedConv2d(in_channels, out_channels, 3, style_dim)
-        self.noise1 = NoiseInjection(out_channels)
-        self.act1 = nn.LeakyReLU(0.2)
-        self.conv2 = ModulatedConv2d(out_channels, out_channels, 3, style_dim)
-        self.noise2 = NoiseInjection(out_channels)
-        self.act2 = nn.LeakyReLU(0.2)
-        # Removed self.to_rgb here as it's unused
-
-    def forward(self, x, style, noise=None):
-        if self.upsample:
-            x = F.interpolate(x, scale_factor=2, mode='nearest')
-            x = self.blur(x)
-        x = self.conv1(x, style)
-        x = self.noise1(x, noise)
-        x = self.act1(x)
-        x = self.conv2(x, style)
-        x = self.noise2(x, noise)
-        x = self.act2(x)
-        return x
-
-
-class ToRGB(nn.Module):
-    def __init__(self, in_channels, style_dim):
-        super().__init__()
-        self.conv = ModulatedConv2d(in_channels, 3, 1, style_dim, demodulate=False)
-
-    def forward(self, x, style):
-        return self.conv(x, style)
-
+import torch.nn.functional as F
+from math import sqrt
+import numpy as np
 
 class MappingNetwork(nn.Module):
-    def __init__(self, latent_dim, style_dim, num_layers=8):
+    def __init__(self, z_dim, w_dim):
         super().__init__()
-        layers = []
-        # Map latent_dim -> style_dim in first layer
-        layers.append(nn.Linear(latent_dim, style_dim))
-        layers.append(nn.LeakyReLU(0.2))
-        for _ in range(num_layers - 1):
-            layers.append(nn.Linear(style_dim, style_dim))
-            layers.append(nn.LeakyReLU(0.2))
-        self.mapping = nn.Sequential(*layers)
+        self.mapping = nn.Sequential(
+            EqualizedLinear(z_dim, w_dim),
+            nn.ReLU(),
+            EqualizedLinear(z_dim, w_dim),
+            nn.ReLU(),
+            EqualizedLinear(z_dim, w_dim),
+            nn.ReLU(),
+            EqualizedLinear(z_dim, w_dim),
+            nn.ReLU(),
+            EqualizedLinear(z_dim, w_dim),
+            nn.ReLU(),
+            EqualizedLinear(z_dim, w_dim),
+            nn.ReLU(),
+            EqualizedLinear(z_dim, w_dim),
+            nn.ReLU(),
+            EqualizedLinear(z_dim, w_dim)
+        )
 
-    def forward(self, z):
-        w = self.mapping(z)
-        return w
+    def forward(self, x):
+        x = x / torch.sqrt(torch.mean(x ** 2, dim=1, keepdim=True) + 1e-8)
+        return self.mapping(x)
 
 
 class Generator(nn.Module):
-    def __init__(self, latent_dim=512, style_dim=512, channels=[512,512,256,128,64,32,16,8]):
+    def __init__(self, log_resolution, W_DIM, n_features = 32, max_features = 256):
         super().__init__()
-        self.mapping = MappingNetwork(latent_dim, style_dim)
-        self.constant_input = nn.Parameter(torch.randn(1, channels[0], 4, 4))
-        self.initial_noise = NoiseInjection(channels[0])
-        self.initial_act = nn.LeakyReLU(0.2)
-        self.initial_conv = ModulatedConv2d(channels[0], channels[0], 3, style_dim)
-        self.to_rgb_layers = nn.ModuleList()
-        self.blocks = nn.ModuleList()
 
-        in_c = channels[0]
-        for out_c in channels:
-            self.blocks.append(GenBlock(in_c, out_c, style_dim, upsample=(in_c != out_c)))
-            self.to_rgb_layers.append(ToRGB(out_c, style_dim))
-            in_c = out_c
+        features = [min(max_features, n_features * (2 ** i)) for i in range(log_resolution - 2, -1, -1)]
+        self.n_blocks = len(features)
 
-    def forward(self, z):
-        styles = self.mapping(z)
-        batch = z.shape[0]
-        x = self.constant_input.repeat(batch, 1, 1, 1)
-        x = self.initial_noise(x)
-        x = self.initial_act(x)
-        x = self.initial_conv(x, styles)
-        x = self.initial_act(x)
-        rgb = None
-        for block, to_rgb in zip(self.blocks, self.to_rgb_layers):
-            x = block(x, styles)
-            rgb_new = to_rgb(x, styles)
-            if rgb is None:
-                rgb = rgb_new
-            else:
-                target_h, target_w = rgb_new.shape[-2:]
-                rgb = F.interpolate(rgb, size=(target_h, target_w), mode='nearest') + rgb_new
-        return torch.tanh(rgb)  # tanh output in [-1,1]
+        self.initial_constant = nn.Parameter(torch.randn((1, features[0], 4, 4)))
 
+        self.style_block = StyleBlock(W_DIM, features[0], features[0])
+        self.to_rgb = ToRGB(W_DIM, features[0])
 
-class DiscBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, downsample=True):
+        blocks = [GeneratorBlock(W_DIM, features[i - 1], features[i]) for i in range(1, self.n_blocks)]
+        self.blocks = nn.ModuleList(blocks)
+
+    def forward(self, w, input_noise):
+        batch_size = w.shape[1]
+
+        x = self.initial_constant.expand(batch_size, -1, -1, -1)
+        x = self.style_block(x, w[0], input_noise[0][1])
+        rgb = self.to_rgb(x, w[0])
+
+        for i in range(1, self.n_blocks):
+            x = F.interpolate(x, scale_factor=2, mode="bilinear")
+            x, rgb_new = self.blocks[i - 1](x, w[i], input_noise[i])
+            rgb = F.interpolate(rgb, scale_factor=2, mode="bilinear") + rgb_new
+
+        return torch.tanh(rgb)
+    
+
+class GeneratorBlock(nn.Module):
+    def __init__(self, W_DIM, in_features, out_features):
         super().__init__()
-        self.downsample = downsample
-        self.conv1 = nn.Conv2d(in_channels, in_channels, 3, padding=1)
-        self.act1 = nn.LeakyReLU(0.2)
-        self.conv2 = nn.Conv2d(in_channels, out_channels, 3, padding=1)
-        self.act2 = nn.LeakyReLU(0.2)
-        if downsample:
-            self.blur = Blur(blur_kernel)
 
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.act1(x)
-        x = self.conv2(x)
-        x = self.act2(x)
+        self.style_block1 = StyleBlock(W_DIM, in_features, out_features)
+        self.style_block2 = StyleBlock(W_DIM, out_features, out_features)
 
-        if self.downsample:
-            x = self.blur(x)
-            H, W = x.shape[-2], x.shape[-1]
-            if H >= 2 and W >= 2:
-                x = F.avg_pool2d(x, kernel_size=2)
+        self.to_rgb = ToRGB(W_DIM, out_features)
 
-        return x
+    def forward(self, x, w, noise):
+        x = self.style_block1(x, w, noise[0])
+        x = self.style_block2(x, w, noise[1])
+
+        rgb = self.to_rgb(x, w)
+
+        return x, rgb
+
+
+class StyleBlock(nn.Module):
+    def __init__(self, W_DIM, in_features, out_features):
+        super().__init__()
+
+        self.to_style = EqualizedLinear(W_DIM, in_features, bias=1.0)
+        self.conv = Conv2dWeightModulate(in_features, out_features, kernel_size=3)
+        self.scale_noise = nn.Parameter(torch.zeros(1))
+        self.bias = nn.Parameter(torch.zeros(out_features))
+
+        self.activation = nn.LeakyReLU(0.2, True)
+
+    def forward(self, x, w, noise):
+        s = self.to_style(w)
+        x = self.conv(x, s)
+        if noise is not None:
+            x = x + self.scale_noise[None, :, None, None] * noise
+        return self.activation(x + self.bias[None, :, None, None])
+    
+
+class ToRGB(nn.Module):
+    def __init__(self, W_DIM, features):
+        super().__init__()
+        self.to_style = EqualizedLinear(W_DIM, features, bias=1.0)
+
+        self.conv = Conv2dWeightModulate(features, 3, kernel_size=1, demodulate=False)
+        self.bias = nn.Parameter(torch.zeros(3))
+        self.activation = nn.LeakyReLU(0.2, True)
+
+    def forward(self, x, w):
+        style = self.to_style(w)
+        x = self.conv(x, style)
+        return self.activation(x + self.bias[None, :, None, None])
+    
+
+class Conv2dWeightModulate(nn.Module):
+    def __init__(self, in_features, out_features, kernel_size, demodulate = True, eps = 1e-8):
+        super().__init__()
+        self.out_features = out_features
+        self.demodulate = demodulate
+        self.padding = (kernel_size - 1) // 2
+
+        self.weight = EqualizedWeight([out_features, in_features, kernel_size, kernel_size])
+        self.eps = eps
+
+    def forward(self, x, s):
+        b, _, h, w = x.shape
+
+        s = s[:, None, :, None, None]
+        weights = self.weight()[None, :, :, :, :]
+        weights = weights * s
+
+        if self.demodulate:
+            sigma_inv = torch.rsqrt((weights ** 2).sum(dim=(2, 3, 4), keepdim=True) + self.eps)
+            weights = weights * sigma_inv
+
+        x = x.reshape(1, -1, h, w)
+
+        _, _, *ws = weights.shape
+        weights = weights.reshape(b * self.out_features, *ws)
+
+        x = F.conv2d(x, weights, padding=self.padding, groups=b)
+
+        return x.reshape(-1, self.out_features, h, w)
 
 
 class Discriminator(nn.Module):
-    def __init__(self, channels=[8,16,32,64,128,256,512,512]):
+    def __init__(self, log_resolution, n_features = 64, max_features = 256):
         super().__init__()
-        self.from_rgb = nn.Conv2d(3, channels[-1], kernel_size=1)
-        self.blocks = nn.ModuleList()
-        in_c = channels[-1]
-        for out_c in reversed(channels[:-1]):
-            self.blocks.append(DiscBlock(in_c, out_c, downsample=True))
-            in_c = out_c
-        self.final_conv = nn.Conv2d(in_c, in_c, kernel_size=3, padding=1)
-        self.final_act  = nn.LeakyReLU(0.2)
-        self.avgpool = nn.AdaptiveAvgPool2d(1)
-        self.fc      = nn.Linear(in_c, 1)
+
+        features = [min(max_features, n_features * (2 ** i)) for i in range(log_resolution - 1)]
+
+        self.from_rgb = nn.Sequential(
+            EqualizedConv2d(3, n_features, 1),
+            nn.LeakyReLU(0.2, True),
+        )
+        n_blocks = len(features) - 1
+        blocks = [DiscriminatorBlock(features[i], features[i + 1]) for i in range(n_blocks)]
+        self.blocks = nn.Sequential(*blocks)
+
+        final_features = features[-1] + 1
+        self.conv = EqualizedConv2d(final_features, final_features, 3)
+        self.final = EqualizedLinear(2 * 2 * final_features, 1)
+
+    def minibatch_std(self, x):
+        batch_statistics = (
+            torch.std(x, dim=0).mean().repeat(x.shape[0], 1, x.shape[2], x.shape[3])
+        )
+        return torch.cat([x, batch_statistics], dim=1)
 
     def forward(self, x):
         x = self.from_rgb(x)
-        for block in self.blocks:
-            x = block(x)
-        x = self.final_conv(x)
-        x = self.final_act(x)
-        x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
-        x = self.fc(x)
-        return x
+        x = self.blocks(x)
+
+        x = self.minibatch_std(x)
+        x = self.conv(x)
+        x = x.reshape(x.shape[0], -1)
+        return self.final(x)
 
 
-def get_generator(l_dim=512, s_dim=512):
-    return Generator(latent_dim=l_dim, style_dim=s_dim)
+class DiscriminatorBlock(nn.Module):
+    def __init__(self, in_features, out_features):
+        super().__init__()
+        self.residual = nn.Sequential(nn.AvgPool2d(kernel_size=2, stride=2),
+                                      EqualizedConv2d(in_features, out_features, kernel_size=1))
 
+        self.block = nn.Sequential(
+            EqualizedConv2d(in_features, in_features, kernel_size=3, padding=1),
+            nn.LeakyReLU(0.2, True),
+            EqualizedConv2d(in_features, out_features, kernel_size=3, padding=1),
+            nn.LeakyReLU(0.2, True),
+        )
 
-def get_discriminator():
-    return Discriminator()
+        self.down_sample = nn.AvgPool2d(
+            kernel_size=2, stride=2
+        )
+
+        self.scale = 1 / sqrt(2)
+
+    def forward(self, x):
+        residual = self.residual(x)
+
+        x = self.block(x)
+        x = self.down_sample(x)
+
+        return (x + residual) * self.scale
+    
+
+class EqualizedLinear(nn.Module):
+    def __init__(self, in_features, out_features, bias = 0.):
+
+        super().__init__()
+        self.weight = EqualizedWeight([out_features, in_features])
+        self.bias = nn.Parameter(torch.ones(out_features) * bias)
+
+    def forward(self, x: torch.Tensor):
+        return F.linear(x, self.weight(), bias=self.bias)
+    
+
+class EqualizedConv2d(nn.Module):
+    def __init__(self, in_features, out_features, kernel_size, padding = 0):
+
+        super().__init__()
+        self.padding = padding
+        self.weight = EqualizedWeight([out_features, in_features, kernel_size, kernel_size])
+        self.bias = nn.Parameter(torch.ones(out_features))
+
+    def forward(self, x: torch.Tensor):
+        return F.conv2d(x, self.weight(), bias=self.bias, padding=self.padding)
+    
+
+class EqualizedWeight(nn.Module):
+    def __init__(self, shape):
+        super().__init__()
+
+        self.c = 1 / sqrt(np.prod(shape[1:]))
+        self.weight = nn.Parameter(torch.randn(shape))
+
+    def forward(self):
+        return self.weight * self.c
+    
+
+class PathLengthPenalty(nn.Module):
+    def __init__(self, beta):
+        super().__init__()
+
+        self.beta = beta
+        self.steps = nn.Parameter(torch.tensor(0.), requires_grad=False)
+
+        self.exp_sum_a = nn.Parameter(torch.tensor(0.), requires_grad=False)
+
+    def forward(self, w, x):
+        device = x.device
+        image_size = x.shape[2] * x.shape[3]
+        y = torch.randn(x.shape, device=device)
+
+        output = (x * y).sum() / sqrt(image_size)
+        sqrt(image_size)
+
+        gradients, *_ = torch.autograd.grad(outputs=output,
+                                            inputs=w,
+                                            grad_outputs=torch.ones(output.shape, device=device),
+                                            create_graph=True)
+
+        norm = (gradients ** 2).sum(dim=2).mean(dim=1).sqrt()
+
+        if self.steps > 0:
+
+            a = self.exp_sum_a / (1 - self.beta ** self.steps)
+
+            loss = torch.mean((norm - a) ** 2)
+        else:
+            loss = norm.new_tensor(0)
+
+        mean = norm.mean().detach()
+        self.exp_sum_a.mul_(self.beta).add_(mean, alpha=1 - self.beta)
+        self.steps.add_(1.)
+
+        return loss
+    
+
+def get_noise(batch_size, log_res, device):
+        noise = []
+        resolution = 4
+
+        for i in range(log_res):
+            if i == 0:
+                n1 = None
+            else:
+                n1 = torch.randn(batch_size, 1, resolution, resolution, device=device)
+            n2 = torch.randn(batch_size, 1, resolution, resolution, device=device)
+            noise.append((n1, n2))
+            resolution *= 2
+
+        return noise
+
+def get_w(batch_size, W_dim, log_res, M, device):
+    z = torch.randn(batch_size, W_dim).to(device)
+    w = M(z)
+    return w[None, :, :].expand(log_res, -1, -1)
